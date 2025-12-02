@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local-to-Global Lensless Imaging</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <!-- MathJax for LaTeX formula support (with inline and display math) -->
+  <script>
+    MathJax = {
+      tex: { inlineMath: [['$', '$'], ['\\(', '\\)']], displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+
+<body>
+  <main class="page">
+    <header class="hero hero-title">
+      <div class="hero-inner">
+        <h1>Large-field-of-view lensless imaging with miniaturized sensors</h1>
+        <p class="lead">Yu Ren, Xiaoling Zhang, Xu Zhan, Xiangdong Ma, Yunqi Wang, Edmund Y. Lam, and Tianjiao Zeng</p>
+        <div class="hero-actions" style="margin-top:12px; display:flex; gap:12px; justify-content:center;">
+          <a class="cta-btn" href="https://github.com/KB504-public/l2g_lensless_imaging" target="_blank" rel="noopener"
+            style="display:inline-block; padding:6px 6px; background:#eaf4ff; color:var(--accent); border:1px solid var(--accent); border-radius:999px; text-decoration:none; font-weight:600;">GitHub</a>
+          <a class="cta-btn" href="https://arxiv.org/abs/2512.00488" target="_blank" rel="noopener"
+            style="display:inline-block; padding:6px 6px; background:#eaf4ff; color:var(--accent); border:1px solid var(--accent); border-radius:999px; text-decoration:none; font-weight:600;">ArXiv</a>
+        </div>
+      </div>
+    </header>
+
+    <figure class="center-figure" style="text-align:center; margin:1rem 0;">
+      <img src="assets/imgs/demo_effect_of_sensor_truncation.png" alt="Structure of the proposed patch-wise learning deconv network"
+        style="max-width:60%; height:auto; display:inline-block;">
+      <figcaption class="figure-title" style="max-width:65%; margin:0.5rem auto 0; text-align:center; color:inherit;">
+        Progressive sensor truncation degrades reconstruction fidelity and confines the effective field of view to the central region.
+      </figcaption>
+    </figure>
+
+    <header class="hero">
+      <div class="hero-inner">
+        <h1>Abstract</h1>
+        <p class="lead">
+          Lensless cameras replace bulky optics with thin modulation masks, enabling compact imaging systems. However, existing methods rely on an idealized model that assumes a globally shift-invariant point spread function (PSF) and sufficiently large sensors. In reality, the PSF varies spatially across the field of view (FOV), and finite sensor boundaries truncate modulated light—effects that intensify as sensors shrink, degrading peripheral reconstruction quality and limiting the effective FOV. We address these limitations through a local-to-global hierarchical framework grounded in a locally shift-invariant convolution model that explicitly accounts for PSF variation and sensor truncation. Patch-wise learned deconvolution first adaptively estimates local PSFs and reconstructs regions independently. A hierarchical enhancement network then progressively expands its receptive field—from small patches through intermediate blocks to the full image—integrating fine local details with global contextual information. Experiments on public datasets show that our method achieves superior reconstruction quality over a larger effective FOV with significantly reduced sensor sizes. Under extreme miniaturization—sensors reduced to 8% of the original area—we achieve improvements of 2 dB (PSNR) and 5% (SSIM), with particularly notable gains in structural fidelity.
+        </p>
+      </div>
+    </header>
+
+    <header class="hero">
+      <div class="hero-inner">
+        <h1>Main Idea</h1>
+        <h2>Patch-wise Learning Deconvolution</h2>
+        <p class="lead">
+          We adopt the local patch as the fundamental processing unit and model the measurement as a superposition of contributions from individual patches. Formally, we partition the scene into $B_x \times B_y$ patches ${\{A_b\}}_{b=1}^{B_x \times B_y}$, where $B_x$ and $B_y$ denote the amount of horizontal and vertical subdivisions, respectively. Under the local shift-invariance assumption, the measurement corresponding to each patch $A_b$ is given by:
+
+          $$\mathbf{Y}_b = \mathcal{W}(\mathbf{H}_b \circledast \mathbf{X}_b, \Omega) + \mathbf{N}_b$$
+
+          where $\mathbf{H}_b$ denotes the locally accurate shift-invariant PSF for patch $A_b$, $\Omega$ represents the sensor's effective sampling region, and $\mathcal{W}$ is a window function that models sensor truncation:
+
+          \begin{equation}
+          \mathcal{W}(x, \Omega) =
+          \begin{cases}
+          1, & x \in \Omega \\
+          0, & \text{otherwise}
+          \end{cases}
+          \end{equation}
+
+          The complete measurement is then obtained by superposing the contributions from all patches:
+
+          \begin{equation}
+              \mathbf{Y} = \sum_{b=1}^{B_x \times B_y} \mathbf{Y}_b = \mathcal{W}\left[ \sum_{b=1}^{B_x \times B_y} (\mathbf{H}_b \circledast \mathbf{X}_b), \Omega \right] + \mathbf{N}
+          \end{equation}
+
+          In this way, we can process each patch independently, then stitch the results together, which can be expressed mathematically as:
+
+          \begin{equation}
+          \hat{\mathbf{X}} = \sum_{b=1}^{B_x \times B_y} \left( \mathbf{1}_b \odot \hat{\mathbf{X}}_b \right) = \sum_{b=1}^{B_x \times B_y} \left( \mathbf{1}_b \odot \mathcal{F}^{-1} \left[ w_b \odot \mathcal{F}(\mathbf{Y}) \right] \right)
+          \label{eq:imaging_model}
+          \end{equation}
+
+          where $\mathbf{1}_b$ denotes the spatial selection function that isolates patch $b$ (taking the value 1 within the patch and 0 elsewhere), $\odot$ denotes Hadamard product, and $w_b$ represents the patch-specific deconvolution kernel tailored to local PSF characteristics.
+        </p>
+        <p>
+          Following the idea described above, we design the network shown below for patch-wise learning deconvolution.
+        </p>
+        <figure class="center-figure" style="text-align:center; margin:1rem 0;">
+          <img src="assets/imgs/architecture_patchwise_deconv.png" alt="Structure of the proposed patch-wise learning deconv network"
+            style="max-width:60%; height:auto; display:inline-block;">
+          <figcaption class="figure-title" style="margin-top:0.5rem; text-align:center; color:inherit;">
+            Fig. Structure of the proposed patch-wise learning deconv network.
+          </figcaption>
+        </figure>
+
+        <h2>Local-to-GLobal Hierarchical Enhancement</h2>
+        <p>
+          We use a local-to-global hierarchical approach for post-deconvolution enhancement processing. Its design moves beyond simple spatial decoupling by implementing scale-aware semantic processing that integrates local details with global context. A bottom-up feature propagation pathway incorporates fine-grained information into semantic reasoning, allowing reconstructions to preserve texture while maintaining coherence. This stage also introduces data-driven natural image priors, complementing the first stage's physics-based modeling. Together, they ensure the final results achieve both physical accuracy and visual realism. The structure of the proposed enhancement network is as follows.
+        </p>
+        <figure class="center-figure" style="text-align:center; margin:1rem 0;">
+          <img src="assets/imgs/architecture_enhancement.png" alt="Structure of the proposed enhancement network"
+            style="max-width:75%; height:auto; display:inline-block;">
+          <figcaption class="figure-title" style="margin-top:0.5rem; text-align:center; color:inherit;">
+            Fig. Structure of the proposed enhancement network.
+          </figcaption>
+        </figure>
+      </div>
+    </header>
+
+    <header class="hero">
+      <div class="hero-inner">
+        <h1>Comparison</h1>
+
+        <figure class="center-figure" style="text-align:center; margin:1rem 0;">
+          <img src="assets/imgs/demo_meas_sizes.png" alt="Demo of measurement sizes"
+            style="max-width:80%; height:auto; display:inline-block;">
+          <figcaption class="figure-title" style="margin-top:0.5rem; text-align:center; color:inherit;">
+            Fig. Demonstration of measurement sizes of different experiments.
+          </figcaption>
+        </figure>
+
+        <p class="lead">
+        We employ two publicly available datasets, <i><a href="https://waller-lab.github.io/LenslessLearning/dataset.html">DiffuserCam</a></i> and <i><a href="https://siddiquesalman.github.io/flatnet/">PhlatCam</a></i>, to validate the performance of our method. On <i>DiffuserCam</i> dataset (with ground-truth images in 270×480 pixels), two sets of experiments were conducted:
+          <ul>
+            <li><b>full-meas</b> (270×480): retains complete measurement information at full resolution.</li>
+            <li><b>min-meas</b> (210×400): truncates measurements to the central region to match the ground-truth footprint</li>
+          </ul>
+
+          And on <i>PhlatCam</i> dataset (with ground-truth images in 384×384 pixels), three sets of experiments were conducted:
+          <ul>
+            <li><b>full-meas</b> (1280×1480): retains almost all available measurements.</li>
+            <li><b>half-meas</b> (600×800): crops weaker peripheral regions and retains only the primary energy region.</li>
+            <li><b>min-meas</b> (400×400): retains only the central region matching the ground-truth footprint while discarding all peripheral information.</li>
+          </ul>
+        </p>
+      </div>
+    </header>
+
+    <section class="content">
+      <h2 class="section-title">Patch-wise v.s. Global-wise</h2>
+      <div class="gallery">
+        <div id="display" class="display">
+          <div id="spinner" class="spinner" aria-hidden="true"></div>
+          <img id="resultImg" alt="Results" src="assets/imgs/architecture_patchwise_deconv.png">
+          <div id="caption" class="caption">Hover over any method to view the results.</div>
+        </div>
+
+        <aside class="methods" role="tablist" aria-label="Methods">
+          <button class="method-btn" data-img="assets/imgs/architecture_patchwise_deconv.png"
+            data-title="Architecture of the proposed patch-wise deconv method">Architecture</button>
+          <button class="method-btn" data-img="assets/imgs/result_diffusercam_globalwise_deconv.PNG"
+            data-title="Results of global-wise learning deconvolution">Result: Global-wise Learning Deconv</button>
+          <button class="method-btn" data-img="assets/imgs/result_diffusercam_patchwise_deconv.PNG"
+            data-title="Results of patch-wise learning deconvolution">Result: Patch-wise Learning Deconv (ours)</button>
+        </aside>
+      </div>
+
+      <footer class="footnote">
+        <!-- <p>
+          <i>Note:</i>
+        </p> -->
+      </footer>
+    </section>
+
+    <section class="content">
+      <h2 class="section-title">Comparison with other representative methods</h2>
+      <div class="gallery">
+        <div id="display" class="display">
+          <div id="spinner" class="spinner" aria-hidden="true"></div>
+          <img id="resultImg" alt="Results" src="assets/imgs/architecture_enhancement.png">
+          <div id="caption" class="caption">Hover over any method to view the results.</div>
+        </div>
+
+        <aside class="methods" role="tablist" aria-label="Methods">
+          <button class="method-btn" data-img="assets/imgs/architecture_enhancement.png"
+            data-title="Architecture of the proposed patch-wise deconv method">Architecture</button>
+          <button class="method-btn" data-img="assets/imgs/results_flatnet.PNG"
+            data-title="FlatNet: Towards Photorealistic Scene Reconstruction From Lensless Measurements">Result:
+            FlatNet</button>
+          <button class="method-btn" data-img="assets/imgs/results_mwdn_cpsf.PNG"
+            data-title="MWDNs: reconstruction in multi-scale feature spaces for lensless imaging">Result: MWDN-CPSF</button>
+          <button class="method-btn" data-img="assets/imgs/results_deeplir.PNG"
+            data-title="DeepLIR: Attention-Based Approach for Mask-Based Lensless Image Reconstruction">Result:
+            DeepLIR</button>
+          <button class="method-btn" data-img="assets/imgs/results_proposed.PNG"
+            data-title="The Proposed Method">Result: Ours</button>
+        </aside>
+      </div>
+
+      <footer class="footnote">
+        <p>
+          <i>Note: Every representative method here is from a distinct architectural paradigms, FlatNet (two-stage), DeepLIR (deep unfolding) and MWDN-CPSF (multi-scale).</i>
+        </p>
+      </footer>
+    </section>
+
+    <header class="hero">
+      <div class="hero-inner">
+        <h1>References</h1>
+        <p class="lead">
+          <ul>
+            <li>
+              S. S. Khan, V. Sundar, V. Boominathan, et al., “FlatNet: Towards photorealistic scene reconstruction from lensless measurements,” IEEE Trans. on Pattern Anal. Mach. Intell. 44, 1934–1948 (2022).
+            </li>
+            <li>
+              A. Poudel and U. Nakarmi, “DeepLIR: Attention-based approach for mask-based lensless image reconstruction,” in Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV) Workshops, (2024), pp. 431–439.
+            </li>
+            <li>
+              Y. Li, Z. Li, K. Chen, et al., “MWDNs: reconstruction in multi-scale feature spaces for lensless imaging,” Opt. Express 31, 39088–39101 (2023).
+            </li>
+          </ul>
+        </p>
+      </div>
+    </header>
+
+  </main>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
